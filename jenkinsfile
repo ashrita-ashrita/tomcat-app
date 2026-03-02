@@ -1,0 +1,71 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_USER = 'ashritadocker'
+        IMAGE = 'tomcat-app'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/ashrita-ashrita/tomcat-app.git'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh "docker build -t $DOCKER_USER/$IMAGE:latest ."
+            }
+        }
+
+        stage('Login to Docker Hub') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker-hub',
+                    usernameVariable: 'USER',
+                    passwordVariable: 'PASS')]) {
+
+                    sh "echo $PASS | docker login -u $USER --password-stdin"
+                }
+            }
+        }
+
+        stage('Push Image') {
+            steps {
+                sh "docker push $DOCKER_USER/$IMAGE:latest"
+            }
+        }
+
+        stage('Deploy to Swarm') {
+            steps {
+                sh """
+                if docker service ls | grep -q tomcat_service; then
+                    docker service update \
+                      --image $DOCKER_USER/$IMAGE:latest \
+                      --force \
+                      tomcat_service
+                else
+                    docker service create \
+                      --name tomcat_service \
+                      --replicas 3 \
+                      --network ci-cd-net \
+                      -p 5000:8080 \
+                      $DOCKER_USER/$IMAGE:latest
+                fi
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'CI/CD Pipeline executed successfully 🚀'
+        }
+        failure {
+            echo 'Pipeline Failed ❌'
+        }
+    }
+}
